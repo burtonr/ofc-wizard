@@ -31,11 +31,21 @@ type oauthAnswers struct {
 	BaseURL  string
 }
 
+type configAnswers struct {
+	AuditURL        string
+	CustomersURL    string
+	UseDockerfile   bool
+	OFVersion       string
+	ScaleZero       bool
+	NetworkPolicies bool
+}
+
 var (
 	kubernetes          = "kubernetes"
 	swarm               = "swarm"
 	github              = "github"
 	gitlab              = "gitlab"
+	defaultVersion      = "0.9.5"
 	createAppHelpText   = "Create a Github app by following the instructions in the docs: https://docs.openfaas.com/openfaas-cloud/self-hosted/github/"
 	createOAuthHelpText = "Create the OAuth App on your source control management system"
 )
@@ -61,12 +71,19 @@ func StartInstall() {
 
 	oauthAnswers := askOAuthQuestions(initAnswers.SourceControl)
 
+	// s3
+	// tls
+	// dns-service
+
+	finalConfigAnswers := askFinalConfigQuestions()
+
 	// Println statements to avoid "unused" errors (temporary)
 	fmt.Println("Orchestration:", initAnswers.Orchestrator)
 	fmt.Println("Root Domain:", initAnswers.RootDomain)
 	fmt.Println("Registry:", initAnswers.Registry)
 	fmt.Println("Source Control:", initAnswers.SourceControl)
 	fmt.Println("OAuth Client ID:", oauthAnswers.ClientID)
+	fmt.Println("Final Answers:", finalConfigAnswers)
 }
 
 type answers struct {
@@ -212,4 +229,62 @@ func askOAuthQuestions(scm string) *oauthAnswers {
 		return nil
 	}
 	return a
+}
+
+func askFinalConfigQuestions() *configAnswers {
+	answers := &configAnswers{}
+	answers.AuditURL = "http://gateway.openfaas:8080/function/echo"
+	answers.OFVersion = defaultVersion
+
+	var customAuditQuestion = &survey.Confirm{Message: "Would you like to use a custom audit trail URL (ie post to Slack)?"}
+
+	customAudit := false
+	survey.AskOne(customAuditQuestion, &customAudit, nil)
+
+	if customAudit {
+		var auditURLQuestion = &survey.Input{Message: "URL to post audit trail message to:"}
+		survey.AskOne(auditURLQuestion, &answers.AuditURL, nil)
+	}
+
+	// customers
+	var custURLQuestion = &survey.Input{
+		Message: "URL of the customers access control list:",
+		Help:    "The raw text file, or Github raw URL of allowed users. This must be a public repo",
+	}
+
+	survey.AskOne(custURLQuestion, &answers.CustomersURL, nil)
+
+	// dockerfile
+	var dockerfileQuestion = &survey.Confirm{
+		Message: "Would you like to enable the Dockerfile template?",
+		Help:    "This will allow templates built using dockerfile to be deployed which will allow ANY workload to be built and run. Use with caution",
+	}
+
+	survey.AskOne(dockerfileQuestion, &answers.UseDockerfile, nil)
+
+	// scale-zero
+	var scaleZeroQuestion = &survey.Confirm{
+		Message: "Would you like to enable scale-to-zero as the default?",
+		Help:    "With this enabled, all functions will scale to zero. To turn off, add a label 'com.openfaas.scale.zero: false'",
+	}
+
+	survey.AskOne(scaleZeroQuestion, &answers.ScaleZero, nil)
+
+	// ofc version
+	var versionQuestion = &survey.Input{
+		Message: fmt.Sprintf("Enter the version of OpenFaaS Cloud to use (default: %s)", defaultVersion),
+		Help:    "See available versions here: https://github.com/openfaas/openfaas-cloud/releases/",
+	}
+
+	survey.AskOne(versionQuestion, &answers.OFVersion, nil)
+
+	// network policies
+	var netPoliciesQuestion = &survey.Confirm{
+		Message: "Would you like to enable network policies (restrict functions from calling the openfaas namespace)",
+		Help:    "Prevents functions from talkking to the openfaas namespace, and to each other. Use the ingress address for the gateway or external IP instead",
+	}
+
+	survey.AskOne(netPoliciesQuestion, &answers.NetworkPolicies, nil)
+
+	return answers
 }

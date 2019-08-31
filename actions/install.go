@@ -31,6 +31,13 @@ type oauthAnswers struct {
 	BaseURL  string
 }
 
+type storageAnswers struct {
+	URL       string
+	Region    string
+	EnableTLS bool
+	Bucket    string
+}
+
 type configAnswers struct {
 	AuditURL        string
 	CustomersURL    string
@@ -72,6 +79,7 @@ func StartInstall() {
 	oauthAnswers := askOAuthQuestions(initAnswers.SourceControl)
 
 	// s3
+	storageAnswers := askStorageQuestions()
 	// tls
 	// dns-service
 
@@ -83,6 +91,7 @@ func StartInstall() {
 	fmt.Println("Registry:", initAnswers.Registry)
 	fmt.Println("Source Control:", initAnswers.SourceControl)
 	fmt.Println("OAuth Client ID:", oauthAnswers.ClientID)
+	fmt.Println("Storage Answers:", storageAnswers)
 	fmt.Println("Final Answers:", finalConfigAnswers)
 }
 
@@ -229,6 +238,46 @@ func askOAuthQuestions(scm string) *oauthAnswers {
 		return nil
 	}
 	return a
+}
+
+func askStorageQuestions() *storageAnswers {
+	answers := &storageAnswers{
+		URL:       "cloud-minio.openfaas.svc.cluster.local:9000",
+		Region:    "us-east-1",
+		EnableTLS: false,
+		Bucket:    "pipeline"}
+
+	customStorageQuestion := &survey.Confirm{Message: "Would you like to use custom storage (S3 compatible) for logs from buildkit? (Default is an in-cluster Minio)"}
+	customStorage := false
+	survey.AskOne(customStorageQuestion, &customStorage, nil)
+
+	if customStorage {
+		storageQuestions := []*survey.Question{
+			{
+				Name:   "URL",
+				Prompt: &survey.Input{Message: "Enter the Base URL for your storage location:"},
+			},
+			{
+				Name:   "Region",
+				Prompt: &survey.Input{Message: "Enter the S3 region associated with the storage location:"},
+			},
+			{
+				Name:   "Bucket",
+				Prompt: &survey.Input{Message: "Enter the bucket name to store the buildkit logs:"},
+			},
+			{
+				Name:   "EnableTLS",
+				Prompt: &survey.Confirm{Message: "Would you like to enable TLS encryption on the requests to the storage?"},
+			},
+		}
+
+		if err := survey.Ask(storageQuestions, answers); err != nil {
+			fmt.Println(err.Error())
+			return nil
+		}
+	}
+
+	return answers
 }
 
 func askFinalConfigQuestions() *configAnswers {

@@ -363,6 +363,12 @@ func askTLSQuestions(dnsService string) *tlsAnswers {
 		{
 			Name:   "EmailAddress",
 			Prompt: &survey.Input{Message: "Enter the email address to use for registering the domain:"},
+			Validate: func(val interface{}) error {
+				if str, ok := val.(string); !ok || !strings.Contains(str, "@") {
+					return errors.New("You must provide a valid email address")
+				}
+				return nil
+			},
 		},
 		{
 			Name: "IssuerType",
@@ -411,7 +417,7 @@ func askFinalConfigQuestions() *configAnswers {
 	// customers
 	var custURLQuestion = &survey.Input{
 		Message: "URL of the customers access control list:",
-		Help:    "The raw text file, or Github raw URL of allowed users. This must be a public repo",
+		Help:    "The raw text file, or Github raw URL of allowed users. This must be a public endpoint",
 	}
 
 	survey.AskOne(custURLQuestion, &answers.CustomersURL, nil)
@@ -447,6 +453,9 @@ func askFinalConfigQuestions() *configAnswers {
 	}
 
 	survey.AskOne(netPoliciesQuestion, &answers.NetworkPolicies, nil)
+
+	// TODO: ingress (loadbalancer/host)
+	// TODO: custom templates
 
 	return answers
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/burtonr/ofc-wizard/types"
 	"gopkg.in/AlecAivazis/survey.v1"
 )
 
@@ -38,6 +39,23 @@ type storageAnswers struct {
 	Bucket    string
 }
 
+type dnsAnswers struct {
+	Name       string
+	AccessFile types.Literal
+	Filters    []string
+	Namespace  string
+}
+
+type tlsAnswers struct {
+	Enabled      bool
+	IssuerType   string
+	EmailAddress string
+	DNSService   string
+	ProjectID    string // Used only for GCP DNS
+	Region       string // Used only for AWS DNS
+	AccessKey    string // Used only for AWS DNS
+}
+
 type configAnswers struct {
 	AuditURL        string
 	CustomersURL    string
@@ -45,6 +63,14 @@ type configAnswers struct {
 	OFVersion       string
 	ScaleZero       bool
 	NetworkPolicies bool
+}
+
+type dnsProvider struct {
+	FriendlyName string
+	Name         string
+	Filter       []string
+	File         string
+	HelpText     string
 }
 
 var (
@@ -55,6 +81,27 @@ var (
 	defaultVersion      = "0.9.5"
 	createAppHelpText   = "Create a Github app by following the instructions in the docs: https://docs.openfaas.com/openfaas-cloud/self-hosted/github/"
 	createOAuthHelpText = "Create the OAuth App on your source control management system"
+	digOceanDNS         = dnsProvider{
+		FriendlyName: "DigitalOcean",
+		Name:         "digitalocean-dns",
+		Filter:       []string{"do_dns01"},
+		File:         "access-token",
+		HelpText:     "Create a Personal Access Token and save it into a file, with no new lines",
+	}
+	gCloudDNS = dnsProvider{
+		FriendlyName: "Google Cloud",
+		Name:         "clouddns-service-account",
+		Filter:       []string{"gcp_dns01"},
+		File:         "service-account.json",
+		HelpText:     "Create a service account for DNS management and export it",
+	}
+	awsDNS = dnsProvider{
+		FriendlyName: "AWS Route 53",
+		Name:         "route53-credentials-secret",
+		Filter:       []string{"route53_dns01"},
+		File:         "secret-access-key",
+		HelpText:     "Create a role and download it's secret access key",
+	}
 )
 
 // StartInstall will create and ask the survey questions to generate a yml file for use with the ofc-bootstrap tool
@@ -77,11 +124,9 @@ func StartInstall() {
 	}
 
 	oauthAnswers := askOAuthQuestions(initAnswers.SourceControl)
-
-	// s3
 	storageAnswers := askStorageQuestions()
-	// tls
-	// dns-service
+	dnsAnswers := askDNSQuestions()
+	tlsAnswers := askTLSQuestions(dnsAnswers.Name)
 
 	finalConfigAnswers := askFinalConfigQuestions()
 
@@ -92,6 +137,8 @@ func StartInstall() {
 	fmt.Println("Source Control:", initAnswers.SourceControl)
 	fmt.Println("OAuth Client ID:", oauthAnswers.ClientID)
 	fmt.Println("Storage Answers:", storageAnswers)
+	fmt.Println("DNS Answers:", dnsAnswers)
+	fmt.Println("TLS Answers:", tlsAnswers)
 	fmt.Println("Final Answers:", finalConfigAnswers)
 }
 
@@ -165,7 +212,7 @@ func askGithubQuestions() *githubAnswers {
 		{
 			Name: "PrivateKeyFrom",
 			Prompt: &survey.Input{
-				Message: "File location of the private key:",
+				Message: "Enter the path of the file for your private key:",
 				Help:    "Enter the full path of the private key downloaded from the Github app (eg: ~/Downloads/private-key.pem)",
 			},
 			Validate: survey.Required,
@@ -186,7 +233,7 @@ func askGitLabQuestions() *gitlabAnswers {
 		{
 			Name: "WebhookSecret",
 			Prompt: &survey.Input{
-				Message: "Enter your webhook secret (leave blank for a random value):",
+				Message: "Enter the path to the file with your webhook secret (leave blank for a random value):",
 				Help:    "Enter the full path of the private key downloaded from GitLab (eg: ~/Downloads/private-key.pem)",
 			},
 		},
@@ -247,7 +294,7 @@ func askStorageQuestions() *storageAnswers {
 		EnableTLS: false,
 		Bucket:    "pipeline"}
 
-	customStorageQuestion := &survey.Confirm{Message: "Would you like to use custom storage (S3 compatible) for logs from buildkit? (Default is an in-cluster Minio)"}
+	customStorageQuestion := &survey.Confirm{Message: "Would you like to use custom storage (S3 compatible) for logs from buildkit? (not recommended)"}
 	customStorage := false
 	survey.AskOne(customStorageQuestion, &customStorage, nil)
 
@@ -275,6 +322,72 @@ func askStorageQuestions() *storageAnswers {
 			fmt.Println(err.Error())
 			return nil
 		}
+	}
+
+	return answers
+}
+
+func askDNSQuestions() *dnsAnswers {
+	var providers = map[string]dnsProvider{digOceanDNS.FriendlyName: digOceanDNS, gCloudDNS.FriendlyName: gCloudDNS, awsDNS.FriendlyName: awsDNS}
+	dnsNames := []string{digOceanDNS.FriendlyName, gCloudDNS.FriendlyName, awsDNS.FriendlyName}
+
+	nameQuestion := &survey.Select{Message: "Select a DNS provider:", Options: dnsNames}
+	var name string
+	survey.AskOne(nameQuestion, &name, nil)
+
+	fileQuestion := &survey.Input{
+		Message: "Enter the path to the file containing the DNS provider credentials:",
+		Help:    providers[name].HelpText,
+	}
+	var fileName string
+	survey.AskOne(fileQuestion, &fileName, nil)
+
+	selectedProvider := providers[name]
+	resultFileLit := types.Literal{Name: selectedProvider.File, Value: fileName}
+	result := &dnsAnswers{Name: selectedProvider.Name, Filters: selectedProvider.Filter, AccessFile: resultFileLit}
+
+	return result
+}
+
+func askTLSQuestions(dnsService string) *tlsAnswers {
+	answers := &tlsAnswers{Enabled: false}
+
+	enableTLSQuestion := &survey.Confirm{Message: "Would you like to enable TLS? (recommended)"}
+	survey.AskOne(enableTLSQuestion, &answers.Enabled, nil)
+
+	if !answers.Enabled {
+		return answers
+	}
+
+	tlsConfigQuestions := []*survey.Question{
+		{
+			Name:   "EmailAddress",
+			Prompt: &survey.Input{Message: "Enter the email address to use for registering the domain:"},
+		},
+		{
+			Name: "IssuerType",
+			Prompt: &survey.Select{
+				Message: "Choose which type of certificate to issue (recommend prod):",
+				Options: []string{"prod", "staging"},
+			},
+		},
+	}
+
+	survey.Ask(tlsConfigQuestions, answers)
+
+	switch dnsService {
+	case gCloudDNS.Name:
+		survey.AskOne(&survey.Input{Message: "Enter the Project ID:"}, &answers.ProjectID, nil)
+		break
+	case awsDNS.Name:
+		awsConfigQuestions := []*survey.Question{
+			{Name: "Region", Prompt: &survey.Input{Message: "Enter the AWS Region:"}},
+			{Name: "AccessKey", Prompt: &survey.Input{Message: "Enter the Access Key ID:"}},
+		}
+		survey.Ask(awsConfigQuestions, answers)
+		break
+	case digOceanDNS.Name:
+		return answers
 	}
 
 	return answers
@@ -321,7 +434,7 @@ func askFinalConfigQuestions() *configAnswers {
 
 	// ofc version
 	var versionQuestion = &survey.Input{
-		Message: fmt.Sprintf("Enter the version of OpenFaaS Cloud to use (default: %s)", defaultVersion),
+		Message: fmt.Sprintf("Enter the version of OpenFaaS Cloud to use (blank for default: %s)", defaultVersion),
 		Help:    "See available versions here: https://github.com/openfaas/openfaas-cloud/releases/",
 	}
 
@@ -329,7 +442,7 @@ func askFinalConfigQuestions() *configAnswers {
 
 	// network policies
 	var netPoliciesQuestion = &survey.Confirm{
-		Message: "Would you like to enable network policies (restrict functions from calling the openfaas namespace)",
+		Message: "Would you like to enable network policies (restrict functions from calling the openfaas namespace, recommended)",
 		Help:    "Prevents functions from talkking to the openfaas namespace, and to each other. Use the ingress address for the gateway or external IP instead",
 	}
 

@@ -63,6 +63,7 @@ type configAnswers struct {
 	OFVersion       string
 	ScaleZero       bool
 	NetworkPolicies bool
+	Ingress string   
 }
 
 type dnsProvider struct {
@@ -454,7 +455,12 @@ func askFinalConfigQuestions() *configAnswers {
 
 	survey.AskOne(netPoliciesQuestion, &answers.NetworkPolicies, nil)
 
-	// TODO: ingress (loadbalancer/host)
+	var ingressQuestion = &survey.Select{
+		Message: "Choose which type of ingress to use:",
+		Options: []string{"loadbalancer", "host"}, 
+	}
+
+	survey.AskOne(ingressQuestion, &answers.Ingress, nil)
 	// TODO: custom templates
 
 	return answers

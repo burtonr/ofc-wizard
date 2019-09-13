@@ -35,7 +35,7 @@ var rootCmd = &cobra.Command{
 in the ofc-bootstrap tool to ensure that all the values are updated to
 the correct values and nothing gets missed or overlooked.
 
-To start, run ofc-wizard install`,
+To start, run ofc-wizard generate`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	//	Run: func(cmd *cobra.Command, args []string) { },

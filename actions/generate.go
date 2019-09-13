@@ -14,6 +14,7 @@ type initialAnswers struct {
 	RootDomain    string
 	Registry      string
 	SourceControl string
+	EnableOAuth   bool
 }
 
 type githubAnswers struct {
@@ -63,7 +64,7 @@ type configAnswers struct {
 	OFVersion       string
 	ScaleZero       bool
 	NetworkPolicies bool
-	Ingress string   
+	Ingress         string
 }
 
 type dnsProvider struct {
@@ -79,7 +80,7 @@ var (
 	swarm               = "swarm"
 	github              = "github"
 	gitlab              = "gitlab"
-	defaultVersion      = "0.9.5"
+	defaultVersion      = "0.9.7"
 	createAppHelpText   = "Create a Github app by following the instructions in the docs: https://docs.openfaas.com/openfaas-cloud/self-hosted/github/"
 	createOAuthHelpText = "Create the OAuth App on your source control management system"
 	digOceanDNS         = dnsProvider{
@@ -105,42 +106,77 @@ var (
 	}
 )
 
-// StartInstall will create and ask the survey questions to generate a yml file for use with the ofc-bootstrap tool
-func StartInstall() {
-	fmt.Println("Starting wizard")
+// GenerateYaml will create and ask the survey questions to generate a yml file for use with the ofc-bootstrap tool
+func GenerateYaml() {
+	yml := CreateInitFile()
+
 	initAnswers, err := askInitialQuestions()
 
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 
+	yml.Orchestration = initAnswers.Orchestrator
+	yml.RootDomain = initAnswers.RootDomain
+	yml.Registry = initAnswers.Registry
+	yml.SCM = initAnswers.SourceControl
+	yml.EnableOAuth = initAnswers.EnableOAuth
+
 	if initAnswers.SourceControl == github {
 		ghAnswers := askGithubQuestions()
-
-		fmt.Println(ghAnswers)
+		yml.Github = types.Github{
+			AppID: ghAnswers.AppID,
+		}
 	} else if initAnswers.SourceControl == gitlab {
 		glAnswers := askGitLabQuestions()
-
-		fmt.Println(glAnswers)
+		yml.GitLab = types.GitLab{
+			GitLabInstance: glAnswers.Instance,
+		}
 	}
 
-	oauthAnswers := askOAuthQuestions(initAnswers.SourceControl)
+	if initAnswers.EnableOAuth {
+		oAuthAnswers := askOAuthQuestions(initAnswers.SourceControl)
+		yml.OAuth = types.OAuth{
+			ClientID:             oAuthAnswers.ClientID,
+			OAuthProviderBaseURL: oAuthAnswers.BaseURL,
+		}
+	}
+
 	storageAnswers := askStorageQuestions()
+	yml.S3 = types.Storage{
+		S3URL:    storageAnswers.URL,
+		S3Region: storageAnswers.Region,
+		S3Bucket: storageAnswers.Bucket,
+		S3TLS:    storageAnswers.EnableTLS,
+	}
+
 	dnsAnswers := askDNSQuestions()
 	tlsAnswers := askTLSQuestions(dnsAnswers.Name)
 
-	finalConfigAnswers := askFinalConfigQuestions()
+	yml.TLS = tlsAnswers.Enabled
 
-	// Println statements to avoid "unused" errors (temporary)
-	fmt.Println("Orchestration:", initAnswers.Orchestrator)
-	fmt.Println("Root Domain:", initAnswers.RootDomain)
-	fmt.Println("Registry:", initAnswers.Registry)
-	fmt.Println("Source Control:", initAnswers.SourceControl)
-	fmt.Println("OAuth Client ID:", oauthAnswers.ClientID)
-	fmt.Println("Storage Answers:", storageAnswers)
-	fmt.Println("DNS Answers:", dnsAnswers)
-	fmt.Println("TLS Answers:", tlsAnswers)
-	fmt.Println("Final Answers:", finalConfigAnswers)
+	if yml.TLS {
+		yml.TLSConfig = types.TLSConfig{
+			DNSService:  tlsAnswers.DNSService,
+			Email:       tlsAnswers.EmailAddress,
+			IssuerType:  tlsAnswers.IssuerType,
+			ProjectID:   tlsAnswers.ProjectID,
+			Region:      tlsAnswers.Region,
+			AccessKeyID: tlsAnswers.AccessKey,
+		}
+	}
+
+	// finalConfigAnswers := askFinalConfigQuestions()
+
+	// // Println statements to avoid "unused" errors (temporary)
+	// fmt.Println("Orchestration:", initAnswers.Orchestrator)
+	// fmt.Println("Root Domain:", initAnswers.RootDomain)
+	// fmt.Println("Registry:", initAnswers.Registry)
+	// fmt.Println("Source Control:", initAnswers.SourceControl)
+	// fmt.Println("Storage Answers:", storageAnswers)
+	// fmt.Println("DNS Answers:", dnsAnswers)
+	// fmt.Println("TLS Answers:", tlsAnswers)
+	// fmt.Println("Final Answers:", finalConfigAnswers)
 }
 
 type answers struct {
@@ -179,6 +215,10 @@ func askInitialQuestions() (*initialAnswers, error) {
 				Options: []string{github, gitlab},
 			},
 			Validate: survey.Required,
+		},
+		{
+			Name:   "EnableOAuth",
+			Prompt: &survey.Confirm{Message: "Would you like to enable OAuth so only those with Github/Gitlab accounts may log in (recommended)"},
 		},
 	}
 
@@ -457,7 +497,7 @@ func askFinalConfigQuestions() *configAnswers {
 
 	var ingressQuestion = &survey.Select{
 		Message: "Choose which type of ingress to use:",
-		Options: []string{"loadbalancer", "host"}, 
+		Options: []string{"loadbalancer", "host"},
 	}
 
 	survey.AskOne(ingressQuestion, &answers.Ingress, nil)

@@ -20,22 +20,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// installCmd represents the install command
-var installCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Installs a new OpenFaaS Cloud on an existing Kubernetes cluster",
-	Long: `This will step through all of the configuration required to install
-a new OpenFaaS Cloud system on an existing kubernetes cluster.
+// generateCmd represents the install command
+var generateCmd = &cobra.Command{
+	Use:   "generate",
+	Short: "Creates a new OpenFaaS Cloud init.yml file to be used with ofc-bootstrap",
+	Long: `This will step through all of the configuration required to configure
+the init.yml file used by the OpenFaaS Cloud bootstrap tool.
 
 The wizard will ask relevant questions and adjust as you enter your values
-to ensure that your new OpenFaaS Cloud installation is successful!`,
+to ensure that your new OpenFaaS Cloud installation will be successful!`,
 	Run: func(cmd *cobra.Command, args []string) {
-		actions.StartInstall()
+		actions.GenerateYaml()
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(generateCmd)
 
 	// Here you will define your flags and configuration settings.
 
